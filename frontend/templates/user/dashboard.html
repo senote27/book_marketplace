@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}My Books{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="bg-white p-6 rounded-lg shadow">
+        <h2 class="text-2xl font-bold mb-4">My Library</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {% for book in purchased_books %}
+            <div class="border rounded-lg p-4">
+                <img src="{{ book.cover_url }}" alt="{{ book.title }}" class="w-full h-48 object-cover mb-4">
+                <h3 class="font-semibold mb-2">{{ book.title }}</h3>
+                <a href="/read/{{ book.id }}" class="bg-blue-600 text-white px-4 py-2 rounded block text-center">
+                    Read Book
+                </a>
+            </div>
+            {% else %}
+            <p>No books in your library yet.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

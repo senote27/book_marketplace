@@ -1,0 +1,29 @@
+{
+    "development": {
+        "SECRET_KEY": "dev-secret-key-change-in-production",
+        "JWT_SECRET_KEY": "jwt-secret-key-change-in-production",
+        "UPLOAD_FOLDER": "uploads",
+        "WEB3_PROVIDER_URI": "http://localhost:8545",
+        "IPFS_HOST": "/ip4/127.0.0.1/tcp/5001",
+        "ALLOWED_EXTENSIONS": ["pdf", "epub"],
+        "MAX_CONTENT_LENGTH": 16777216
+    },
+    "testing": {
+        "SECRET_KEY": "test-secret-key",
+        "JWT_SECRET_KEY": "test-jwt-secret-key",
+        "UPLOAD_FOLDER": "test_uploads",
+        "WEB3_PROVIDER_URI": "http://localhost:8545",
+        "IPFS_HOST": "/ip4/127.0.0.1/tcp/5001",
+        "ALLOWED_EXTENSIONS": ["pdf", "epub"],
+        "MAX_CONTENT_LENGTH": 16777216
+    },
+    "production": {
+        "SECRET_KEY": "CHANGE_THIS_IN_PRODUCTION",
+        "JWT_SECRET_KEY": "CHANGE_THIS_IN_PRODUCTION",
+        "UPLOAD_FOLDER": "production_uploads",
+        "WEB3_PROVIDER_URI": "YOUR_PRODUCTION_ETHEREUM_NODE",
+        "IPFS_HOST": "YOUR_PRODUCTION_IPFS_NODE",
+        "ALLOWED_EXTENSIONS": ["pdf", "epub"],
+        "MAX_CONTENT_LENGTH": 16777216
+    }
+}

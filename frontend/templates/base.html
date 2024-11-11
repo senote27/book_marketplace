@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}BlockBook Market{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <nav class="bg-blue-600 p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="/" class="text-white font-bold text-xl">BlockBook Market</a>
+            <div class="flex items-center space-x-4">
+                <span id="wallet-address" class="text-white bg-blue-700 px-3 py-1 rounded-full text-sm"></span>
+                {% if current_user.is_authenticated %}
+                    {% if current_user.role == 'author' %}
+                        <a href="{{ url_for('author.dashboard') }}" class="text-white">Author Dashboard</a>
+                    {% elif current_user.role == 'seller' %}
+                        <a href="{{ url_for('seller.dashboard') }}" class="text-white">Seller Dashboard</a>
+                    {% else %}
+                        <a href="{{ url_for('user.dashboard') }}" class="text-white">My Books</a>
+                    {% endif %}
+                    <a href="{{ url_for('auth.logout') }}" class="text-white">Logout</a>
+                {% else %}
+                    <a href="{{ url_for('auth.login') }}" class="text-white">Login</a>
+                    <a href="{{ url_for('auth.register') }}" class="text-white">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto mt-8 px-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert bg-{{ category }}-100 border-l-4 border-{{ category }}-500 text-{{ category }}-700 p-4 mb-4">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.5.2/dist/web3.min.js"></script>
+    <script src="{{ url_for('static', filename='js/web3.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ipfs.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

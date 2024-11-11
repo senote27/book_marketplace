@@ -1,0 +1,225 @@
+/* Dashboard Layout */
+.dashboard {
+    display: grid;
+    gap: 2rem;
+    padding: 1rem;
+}
+
+/* Stats Section */
+.stats-section {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.stat-card {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+}
+
+.stat-card h4 {
+    color: #666;
+    margin-bottom: 0.5rem;
+}
+
+.stat-card p {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+/* Wallet Info */
+.wallet-info {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+}
+
+#wallet-address {
+    font-family: monospace;
+    background-color: #f5f5f5;
+    padding: 0.5rem;
+    border-radius: 4px;
+    margin: 0.5rem 0;
+}
+
+/* Books Grid */
+.books-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+.book-card {
+    background-color: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--card-shadow);
+    transition: transform 0.2s;
+}
+
+.book-card:hover {
+    transform: translateY(-4px);
+}
+
+.book-cover {
+    height: 200px;
+    overflow: hidden;
+}
+
+.book-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.book-details {
+    padding: 1rem;
+}
+
+.book-details h4 {
+    margin-bottom: 0.5rem;
+    color: var(--text-color);
+}
+
+.price {
+    color: var(--primary-color);
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.book-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+/* Upload Form */
+.upload-container {
+    max-width: 800px;
+    margin: 0 auto;
+    background-color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+}
+
+.form-section {
+    margin-bottom: 2rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.upload-status {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.progress-bar {
+    height: 4px;
+    background-color: #e0e0e0;
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+
+.progress-bar div {
+    height: 100%;
+    background-color: var(--primary-color);
+    transition: width 0.3s;
+}
+
+/* Transaction List */
+.transaction-list {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+    overflow: hidden;
+}
+
+.transaction-item {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.transaction-item:last-child {
+    border-bottom: none;
+}
+
+.tx-hash {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-family: monospace;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .books-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .transaction-item {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+
+    .upload-container {
+        padding: 1rem;
+    }
+}
+
+/* Author-specific styles */
+.author-dashboard .stats-section {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+    margin-bottom: 2rem;
+}
+
+/* Seller-specific styles */
+.seller-dashboard .inventory-section {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+    margin-bottom: 2rem;
+}
+
+/* Cover Preview */
+.cover-preview {
+    max-width: 200px;
+    margin-top: 1rem;
+}
+
+.cover-preview img {
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: var(--card-shadow);
+}
+
+/* No Cover Placeholder */
+.no-cover {
+    height: 200px;
+    background-color: #f5f5f5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+}

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Author Dashboard{% endblock %}
+
+{% block content %}
+<div class="author-dashboard">
+    <!-- Wallet and Stats Section -->
+    <div class="stats-section">
+        <div class="wallet-info">
+            <h3>Wallet Status</h3>
+            <p id="wallet-address">Not Connected</p>
+            <button id="connect-wallet" class="btn-primary">Connect Wallet</button>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h4>Total Earnings</h4>
+                <p><span id="total-earnings">0</span> ETH</p>
+            </div>
+            <div class="stat-card">
+                <h4>Books Published</h4>
+                <p><span id="books-count">{{ books|length }}</span></p>
+            </div>
+            <div class="stat-card">
+                <h4>Total Sales</h4>
+                <p><span id="total-sales">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="actions-section">
+        <a href="{{ url_for('author.upload') }}" class="btn-primary">Upload New Book</a>
+    </div>
+
+    <!-- Books List -->
+    <div class="books-section">
+        <h3>My Published Books</h3>
+        <div class="books-grid">
+            {% for book in books %}
+            <div class="book-card">
+                <div class="book-cover">
+                    {% if book.cover_hash %}
+                    <img src="/ipfs/{{ book.cover_hash }}" alt="{{ book.title }}">
+                    {% else %}
+                    <div class="no-cover">No Cover</div>
+                    {% endif %}
+                </div>
+                <div class="book-details">
+                    <h4>{{ book.title }}</h4>
+                    <p class="price">{{ book.price }} ETH</p>
+                    <div class="stats">
+                        <p>Sales: {{ book.sales_count }}</p>
+                        <p>Royalties: {{ book.total_royalties }} ETH</p>
+                    </div>
+                    <div class="book-actions">
+                        <button class="btn-secondary view-stats" data-book-id="{{ book.id }}">
+                            View Stats
+                        </button>
+                        <button class="btn-secondary edit-book" data-book-id="{{ book.id }}">
+                            Edit
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Transaction History -->
+    <div class="transactions-section">
+        <h3>Recent Transactions</h3>
+        <div class="transaction-list">
+            {% for tx in transactions %}
+            <div class="transaction-item">
+                <p class="tx-book">{{ tx.book_title }}</p>
+                <p class="tx-amount">{{ tx.amount }} ETH</p>
+                <p class="tx-date">{{ tx.date }}</p>
+                <a href="https://etherscan.io/tx/{{ tx.hash }}" target="_blank" class="tx-hash">
+                    View on Etherscan
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Stats Modal -->
+<div id="stats-modal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h3>Book Statistics</h3>
+        <div id="book-stats-content"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Connect wallet button
+    document.getElementById('connect-wallet').addEventListener('click', async () => {
+        await Web3Handler.init();
+    });
+
+    // View stats buttons
+    document.querySelectorAll('.view-stats').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            const bookId = e.target.dataset.bookId;
+            const modal = document.getElementById('stats-modal');
+            const content = document.getElementById('book-stats-content');
+            
+            try {
+                const response = await fetch(`/api/author/book-stats/${bookId}`);
+                const stats = await response.json();
+                content.innerHTML = `
+                    <p>Total Sales: ${stats.totalSales}</p>
+                    <p>Total Earnings: ${stats.totalEarnings} ETH</p>
+                    <p>Last Sale: ${stats.lastSale}</p>
+                `;
+                modal.style.display = 'block';
+            } catch (error) {
+                alert('Failed to load book statistics');
+            }
+        });
+    });
+
+    // Close modal
+    document.querySelector('.close').addEventListener('click', () => {
+        document.getElementById('stats-modal').style.display = 'none';
+    });
+});
+</script>
+{% endblock %}

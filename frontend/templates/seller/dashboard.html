@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Seller Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Stats Overview -->
+    <div class="stats-overview">
+        <div class="stat-card">
+            <h3>Total Sales</h3>
+            <div class="stat-value" id="total-sales-eth">0 ETH</div>
+            <div class="stat-subtext">Lifetime earnings</div>
+        </div>
+        <div class="stat-card">
+            <h3>Active Books</h3>
+            <div class="stat-value" id="active-books">0</div>
+            <div class="stat-subtext">Currently listed</div>
+        </div>
+        <div class="stat-card">
+            <h3>Recent Sales</h3>
+            <div class="stat-value" id="recent-sales">0</div>
+            <div class="stat-subtext">Last 30 days</div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="action-bar">
+        <button class="btn-primary" onclick="window.location.href='{{ url_for('seller.manage') }}'">
+            Add New Book
+        </button>
+        <div class="wallet-status">
+            <span>Wallet:</span>
+            <span id="wallet-address">Not Connected</span>
+        </div>
+    </div>
+
+    <!-- Books List -->
+    <div class="books-section">
+        <h2>Your Listed Books</h2>
+        <div class="books-grid" id="books-container">
+            {% for book in books %}
+            <div class="book-card" data-book-id="{{ book.id }}">
+                <div class="book-cover">
+                    <img src="{{ book.cover_url }}" alt="{{ book.title }}" onerror="this.src='/static/img/default-cover.png'">
+                </div>
+                <div class="book-details">
+                    <h3>{{ book.title }}</h3>
+                    <p class="book-price">{{ book.price }} ETH</p>
+                    <div class="book-stats">
+                        <span>Sales: {{ book.sales_count }}</span>
+                        <span>Revenue: {{ book.total_revenue }} ETH</span>
+                    </div>
+                    <div class="book-actions">
+                        <button class="btn-secondary" onclick="editBook('{{ book.id }}')">Edit</button>
+                        <button class="btn-danger" onclick="toggleBookStatus('{{ book.id }}')">
+                            {% if book.is_active %}Deactivate{% else %}Activate{% endif %}
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Recent Transactions -->
+    <div class="transactions-section">
+        <h2>Recent Transactions</h2>
+        <div class="transactions-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Book</th>
+                        <th>Buyer</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="transactions-container">
+                    {% for tx in transactions %}
+                    <tr>
+                        <td>{{ tx.date }}</td>
+                        <td>{{ tx.book_title }}</td>
+                        <td>{{ tx.buyer_address[:6] }}...{{ tx.buyer_address[-4:] }}</td>
+                        <td>{{ tx.amount }} ETH</td>
+                        <td>
+                            <span class="status-badge status-{{ tx.status }}">
+                                {{ tx.status }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function editBook(bookId) {
+    window.location.href = `/seller/manage/${bookId}`;
+}
+
+async function toggleBookStatus(bookId) {
+    try {
+        const response = await fetch(`/api/seller/books/${bookId}/toggle`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            throw new Error('Failed to update book status');
+        }
+    } catch (error) {
+        alert('Error updating book status: ' + error.message);
+    }
+}
+
+// Update dashboard stats periodically
+async function updateDashboardStats() {
+    try {
+        const response = await fetch('/api/seller/stats');
+        const stats = await response.json();
+        
+        document.getElementById('total-sales-eth').textContent = `${stats.totalSales} ETH`;
+        document.getElementById('active-books').textContent = stats.activeBooks;
+        document.getElementById('recent-sales').textContent = stats.recentSales;
+    } catch (error) {
+        console.error('Error updating stats:', error);
+    }
+}
+
+// Update stats every 60 seconds
+setInterval(updateDashboardStats, 60000);
+updateDashboardStats();
+</script>
+{% endblock %}
