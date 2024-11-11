@@ -1,184 +1,96 @@
+# backend/utils/ipfs.py
 import ipfshttpclient
-from typing import Optional, Tuple, Union
-import logging
+import aiofiles
+import os
+from fastapi import UploadFile, HTTPException
+from typing import Optional
 import tempfile
+import logging
 from pathlib import Path
-import aiohttp
-import asyncio
-from datetime import datetime
 
-class IPFSError(Exception):
-    """Base exception for IPFS-related errors"""
-    pass
+logger = logging.getLogger(__name__)
 
-class IPFSHandler:
-    def __init__(
-        self, 
-        ipfs_host: str = '/ip4/127.0.0.1/tcp/5001',
-        ipfs_gateway: str = 'https://ipfs.io/ipfs'
-    ):
-        self.ipfs_host = ipfs_host
-        self.ipfs_gateway = ipfs_gateway
+class IPFSManager:
+    def __init__(self):
         self.client = None
-        self._setup_logging()
+        self.connect()
+        self.allowed_extensions = {'.pdf', '.jpg', '.jpeg', '.png'}
+        self.max_file_size = 50 * 1024 * 1024  # 50MB
 
-    def _setup_logging(self) -> None:
-        """Configure logging for IPFS operations"""
-        self.logger = logging.getLogger('IPFSHandler')
-        self.logger.setLevel(logging.INFO)
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
-    async def connect(self) -> bool:
-        """
-        Establish connection to IPFS daemon
-        Returns:
-            bool: True if connection successful, False otherwise
-        """
+    def connect(self):
+        """Establish connection to local IPFS daemon"""
         try:
-            if not self.client:
-                self.client = ipfshttpclient.connect(self.ipfs_host)
-            return True
+            self.client = ipfshttpclient.connect('/ip4/127.0.0.1/tcp/5001')
         except Exception as e:
-            self.logger.error(f"Failed to connect to IPFS: {e}")
-            return False
+            logger.error(f"Failed to connect to IPFS: {str(e)}")
+            raise HTTPException(status_code=500, detail="IPFS connection failed")
 
-    async def upload_file(
-        self, 
-        file_path: Union[str, Path], 
-        keep_filename: bool = True
-    ) -> Tuple[str, Optional[str]]:
-        """
-        Upload a file to IPFS
-        
-        Args:
-            file_path: Path to the file
-            keep_filename: Whether to preserve original filename in IPFS
-            
-        Returns:
-            Tuple[str, Optional[str]]: (IPFS hash, filename if kept)
-        """
-        try:
-            if not await self.connect():
-                raise IPFSError("Failed to connect to IPFS")
-
-            file_path = Path(file_path)
-            if not file_path.exists():
-                raise FileNotFoundError(f"File not found: {file_path}")
-
-            result = self.client.add(
-                str(file_path),
-                pin=True,
-                wrap_with_directory=keep_filename
+    def validate_file(self, file: UploadFile) -> None:
+        """Validate file extension and size"""
+        # Check extension
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in self.allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type not allowed. Allowed types: {self.allowed_extensions}"
             )
 
-            if keep_filename:
-                # Get the hash of the directory
-                ipfs_hash = result[-1]['Hash']
-                filename = file_path.name
-            else:
-                ipfs_hash = result['Hash']
-                filename = None
-
-            self.logger.info(f"File uploaded to IPFS: {ipfs_hash}")
-            return ipfs_hash, filename
-
-        except Exception as e:
-            self.logger.error(f"Error uploading to IPFS: {e}")
-            raise IPFSError(f"Upload failed: {str(e)}")
-
-    async def upload_bytes(
-        self, 
-        content: bytes, 
-        filename: Optional[str] = None
-    ) -> str:
-        """
-        Upload bytes data to IPFS
-        
-        Args:
-            content: Bytes to upload
-            filename: Optional filename to preserve
-            
-        Returns:
-            str: IPFS hash
-        """
+    async def add_file(self, file: UploadFile) -> str:
+        """Add file to IPFS and return hash"""
         try:
-            if not await self.connect():
-                raise IPFSError("Failed to connect to IPFS")
+            self.validate_file(file)
+            
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_path = temp_file.name
+                
+                # Write uploaded file to temporary file
+                async with aiofiles.open(temp_path, 'wb') as out_file:
+                    content = await file.read()
+                    if len(content) > self.max_file_size:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"File size exceeds maximum limit of {self.max_file_size/1024/1024}MB"
+                        )
+                    await out_file.write(content)
 
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(content)
-                tmp_path = tmp.name
+                # Add to IPFS
+                ipfs_response = self.client.add(temp_path)
+                ipfs_hash = ipfs_response['Hash']
 
-            try:
-                if filename:
-                    ipfs_hash, _ = await self.upload_file(tmp_path, keep_filename=True)
-                else:
-                    ipfs_hash, _ = await self.upload_file(tmp_path, keep_filename=False)
+                # Clean up
+                os.unlink(temp_path)
                 
                 return ipfs_hash
 
-            finally:
-                Path(tmp_path).unlink()
-
         except Exception as e:
-            self.logger.error(f"Error uploading bytes to IPFS: {e}")
-            raise IPFSError(f"Upload failed: {str(e)}")
+            logger.error(f"IPFS upload failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload to IPFS: {str(e)}")
 
-    async def get_file(
-        self, 
-        ipfs_hash: str,
-        timeout: int = 30
-    ) -> bytes:
-        """
-        Retrieve a file from IPFS
-        
-        Args:
-            ipfs_hash: IPFS hash of the file
-            timeout: Timeout in seconds
-            
-        Returns:
-            bytes: File content
-        """
-        async with aiohttp.ClientSession() as session:
-            try:
-                url = f"{self.ipfs_gateway}/{ipfs_hash}"
-                async with session.get(url, timeout=timeout) as response:
-                    if response.status != 200:
-                        raise IPFSError(f"Failed to fetch file: HTTP {response.status}")
-                    return await response.read()
-
-            except asyncio.TimeoutError:
-                raise IPFSError("Timeout while fetching file from IPFS")
-            except Exception as e:
-                raise IPFSError(f"Error fetching file: {str(e)}")
-
-    async def is_available(self, ipfs_hash: str) -> bool:
-        """
-        Check if a file is available on IPFS
-        
-        Args:
-            ipfs_hash: IPFS hash to check
-            
-        Returns:
-            bool: True if available, False otherwise
-        """
+    async def get_file(self, ipfs_hash: str) -> Optional[bytes]:
+        """Retrieve file from IPFS by hash"""
         try:
-            await self.get_file(ipfs_hash, timeout=5)
-            return True
-        except:
-            return False
+            return self.client.cat(ipfs_hash)
+        except Exception as e:
+            logger.error(f"IPFS retrieval failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve from IPFS: {str(e)}")
 
-    def close(self) -> None:
-        """Close IPFS connection"""
+    def get_ipfs_url(self, ipfs_hash: str) -> str:
+        """Generate IPFS gateway URL for hash"""
+        return f"http://localhost:8080/ipfs/{ipfs_hash}"
+
+    async def pin_file(self, ipfs_hash: str) -> None:
+        """Pin file to ensure persistence"""
+        try:
+            self.client.pin.add(ipfs_hash)
+        except Exception as e:
+            logger.error(f"IPFS pinning failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to pin file: {str(e)}")
+
+    def __del__(self):
+        """Cleanup IPFS client connection"""
         if self.client:
             try:
                 self.client.close()
-                self.client = None
-            except Exception as e:
-                self.logger.error(f"Error closing IPFS connection: {e}")
+            except:
+                pass

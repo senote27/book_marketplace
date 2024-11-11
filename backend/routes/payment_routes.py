@@ -1,279 +1,120 @@
-from flask import Blueprint, jsonify, request, current_app
+# backend/routes/payment_routes.py
+
+from fastapi import APIRouter, HTTPException, Depends
 from web3 import Web3
-from ..utils.eth import EthereumHandler
-from ..models import Book, Transaction, User
-from ..middleware import require_auth
-from ..database import db
-from datetime import datetime
-import logging
-from typing import Dict, Any
+from typing import Dict
+from ..database import get_db
+from ..models import User, Book, Transaction
+from ..utils.eth import get_contract
+from sqlalchemy.orm import Session
+import json
 
-payment_bp = Blueprint('payment', __name__)
-eth_handler = EthereumHandler()
+router = APIRouter()
+w3 = Web3(Web3.HTTPProvider('http://127.0.0.1:8545'))  # Local Ganache for testing
 
-# Set up logging
-logger = logging.getLogger(__name__)
-
-@payment_bp.route('/purchase/<int:book_id>', methods=['POST'])
-@require_auth
-async def purchase_book(book_id: int):
-    """
-    Purchase a book using cryptocurrency.
-    """
+@router.post("/purchase/{book_id}")
+async def purchase_book(
+    book_id: int,
+    buyer_address: str,
+    db: Session = Depends(get_db)
+):
     try:
-        # Get user from session/token
-        user = request.user
-        
         # Get book details
-        book = Book.query.get_or_404(book_id)
-        if not book.is_available:
-            return jsonify({
-                'status': 'error',
-                'message': 'Book is not available for purchase'
-            }), 400
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
 
-        # Verify payment data
-        data = request.get_json()
-        if not data or 'buyer_address' not in data or 'signature' not in data:
-            return jsonify({
-                'status': 'error',
-                'message': 'Missing payment information'
-            }), 400
+        # Get seller and author details
+        seller = db.query(User).filter(User.id == book.seller_id).first()
+        author = db.query(User).filter(User.id == book.author_id).first()
 
-        buyer_address = data['buyer_address']
-        signature = data['signature']
-        private_key = data.get('private_key')  # Only for testing environment
+        # Get contract instance
+        contract = get_contract()
 
-        # Verify signature
-        message = f"Purchase book {book_id} for {book.price} wei"
-        if not eth_handler.verify_signature(message, signature, buyer_address):
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid signature'
-            }), 401
+        # Calculate royalty
+        royalty_amount = int(float(book.price) * (book.royalty_percentage / 100))
+        seller_amount = int(float(book.price) - royalty_amount)
 
-        # Execute purchase transaction
-        purchase_result = await eth_handler.purchase_book(
-            buyer_address=buyer_address,
-            book_id=book.blockchain_id,
-            value=book.price,
-            private_key=private_key
-        )
+        # Create transaction in smart contract
+        tx_hash = contract.functions.purchaseBook(
+            book_id,
+            seller.eth_address,
+            author.eth_address,
+            seller_amount,
+            royalty_amount
+        ).transact({'from': buyer_address, 'value': book.price})
 
-        if purchase_result['status'] != 'success':
-            return jsonify({
-                'status': 'error',
-                'message': 'Blockchain transaction failed'
-            }), 400
-
-        # Record transaction in database
+        # Store transaction in database
         transaction = Transaction(
             book_id=book_id,
-            buyer_id=user.id,
-            seller_id=book.author_id,
+            buyer_address=buyer_address,
+            seller_address=seller.eth_address,
             amount=book.price,
-            transaction_hash=purchase_result['transaction_hash'],
-            status='completed',
-            timestamp=datetime.utcnow()
+            status="completed",
+            tx_hash=tx_hash.hex()
         )
-        db.session.add(transaction)
-        db.session.commit()
+        db.add(transaction)
+        db.commit()
 
-        return jsonify({
-            'status': 'success',
-            'transaction': {
-                'hash': purchase_result['transaction_hash'],
-                'block_number': purchase_result['block_number'],
-                'gas_used': purchase_result['gas_used']
-            }
-        }), 200
+        return {
+            "status": "success",
+            "tx_hash": tx_hash.hex(),
+            "message": "Book purchased successfully"
+        }
 
     except Exception as e:
-        logger.error(f"Purchase error: {str(e)}")
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Internal server error'
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@payment_bp.route('/royalties', methods=['GET'])
-@require_auth
-async def get_royalties():
-    """
-    Get available royalties for the authenticated author.
-    """
+@router.get("/transaction/{tx_hash}")
+async def get_transaction_status(tx_hash: str, db: Session = Depends(get_db)):
     try:
-        user = request.user
-        if not user.is_author:
-            return jsonify({
-                'status': 'error',
-                'message': 'Only authors can view royalties'
-            }), 403
-
-        royalties = await eth_handler.get_royalties(user.ethereum_address)
+        # Get transaction receipt from blockchain
+        tx_receipt = w3.eth.get_transaction_receipt(tx_hash)
         
-        return jsonify({
-            'status': 'success',
-            'royalties': royalties,
-            'address': user.ethereum_address
-        }), 200
+        # Get transaction from database
+        transaction = db.query(Transaction).filter(Transaction.tx_hash == tx_hash).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
 
-    except Exception as e:
-        logger.error(f"Royalties fetch error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Failed to fetch royalties'
-        }), 500
-
-@payment_bp.route('/royalties/withdraw', methods=['POST'])
-@require_auth
-async def withdraw_royalties():
-    """
-    Withdraw available royalties for the authenticated author.
-    """
-    try:
-        user = request.user
-        if not user.is_author:
-            return jsonify({
-                'status': 'error',
-                'message': 'Only authors can withdraw royalties'
-            }), 403
-
-        data = request.get_json()
-        if not data or 'signature' not in data:
-            return jsonify({
-                'status': 'error',
-                'message': 'Missing signature'
-            }), 400
-
-        signature = data['signature']
-        private_key = data.get('private_key')  # Only for testing environment
-
-        # Verify signature
-        message = f"Withdraw royalties for {user.ethereum_address}"
-        if not eth_handler.verify_signature(message, signature, user.ethereum_address):
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid signature'
-            }), 401
-
-        # Execute withdrawal
-        withdrawal_result = await eth_handler.withdraw_royalties(
-            author_address=user.ethereum_address,
-            private_key=private_key
-        )
-
-        if withdrawal_result['status'] != 'success':
-            return jsonify({
-                'status': 'error',
-                'message': 'Withdrawal transaction failed'
-            }), 400
-
-        # Record withdrawal transaction
-        transaction = Transaction(
-            seller_id=user.id,
-            amount=withdrawal_result.get('amount', 0),
-            transaction_hash=withdrawal_result['transaction_hash'],
-            status='completed',
-            timestamp=datetime.utcnow(),
-            type='withdrawal'
-        )
-        db.session.add(transaction)
-        db.session.commit()
-
-        return jsonify({
-            'status': 'success',
-            'transaction': {
-                'hash': withdrawal_result['transaction_hash'],
-                'block_number': withdrawal_result['block_number'],
-                'gas_used': withdrawal_result['gas_used']
+        return {
+            "status": "confirmed" if tx_receipt else "pending",
+            "block_number": tx_receipt["blockNumber"] if tx_receipt else None,
+            "transaction": {
+                "book_id": transaction.book_id,
+                "amount": transaction.amount,
+                "buyer": transaction.buyer_address,
+                "seller": transaction.seller_address,
+                "timestamp": transaction.created_at.isoformat()
             }
-        }), 200
+        }
 
     except Exception as e:
-        logger.error(f"Withdrawal error: {str(e)}")
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Internal server error'
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@payment_bp.route('/transactions', methods=['GET'])
-@require_auth
-async def get_transactions():
-    """
-    Get transaction history for the authenticated user.
-    """
+@router.get("/royalties/{author_id}")
+async def get_author_royalties(author_id: int, db: Session = Depends(get_db)):
     try:
-        user = request.user
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int)
+        # Get all transactions for author's books
+        author_books = db.query(Book).filter(Book.author_id == author_id).all()
+        book_ids = [book.id for book in author_books]
+        
+        transactions = db.query(Transaction).filter(
+            Transaction.book_id.in_(book_ids)
+        ).all()
 
-        # Query transactions
-        transactions = Transaction.query.filter(
-            (Transaction.buyer_id == user.id) | 
-            (Transaction.seller_id == user.id)
-        ).order_by(
-            Transaction.timestamp.desc()
-        ).paginate(
-            page=page, 
-            per_page=per_page
-        )
+        total_royalties = sum([
+            t.amount * (b.royalty_percentage/100) 
+            for t in transactions 
+            for b in author_books 
+            if b.id == t.book_id
+        ])
 
-        return jsonify({
-            'status': 'success',
-            'transactions': [{
-                'id': tx.id,
-                'type': tx.type,
-                'amount': tx.amount,
-                'status': tx.status,
-                'timestamp': tx.timestamp.isoformat(),
-                'transaction_hash': tx.transaction_hash,
-                'book_title': tx.book.title if tx.book_id else None
-            } for tx in transactions.items],
-            'pagination': {
-                'total': transactions.total,
-                'pages': transactions.pages,
-                'current_page': transactions.page,
-                'per_page': transactions.per_page
-            }
-        }), 200
+        return {
+            "total_royalties": total_royalties,
+            "transaction_count": len(transactions),
+            "books_sold": len(set([t.book_id for t in transactions]))
+        }
 
     except Exception as e:
-        logger.error(f"Transaction history error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Failed to fetch transaction history'
-        }), 500
-
-@payment_bp.route('/balance', methods=['GET'])
-@require_auth
-async def get_balance():
-    """
-    Get the current balance for the authenticated user.
-    """
-    try:
-        user = request.user
-        if not user.ethereum_address:
-            return jsonify({
-                'status': 'error',
-                'message': 'No ethereum address associated with account'
-            }), 400
-
-        balance = Web3.from_wei(
-            eth_handler.w3.eth.get_balance(user.ethereum_address),
-            'ether'
-        )
-
-        return jsonify({
-            'status': 'success',
-            'balance': str(balance),
-            'address': user.ethereum_address
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Balance fetch error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Failed to fetch balance'
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
