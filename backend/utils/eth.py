@@ -8,7 +8,7 @@ from eth_account.messages import encode_defunct
 from datetime import datetime
 
 class EthereumHandler:
-    # Ganache-specific configuration
+    # Ganache-specific configurations
     GANACHE_CONFIG = {
         'PROVIDER_URL': 'http://localhost:7545',
         'CHAIN_ID': 1337,
@@ -17,11 +17,10 @@ class EthereumHandler:
         'DEFAULT_GAS_PRICE': 20000000000  # 20 gwei
     }
 
-    def __init__(self, provider_url: str = None):
+    def __init__(self, provider_url: str = GANACHE_CONFIG['PROVIDER_URL']):
         """Initialize Ethereum connection with Ganache."""
-        self.provider_url = provider_url or self.GANACHE_CONFIG['PROVIDER_URL']
-        self.w3 = Web3(Web3.HTTPProvider(self.provider_url))
-        # Remove POA middleware for Ganache
+        self.w3 = Web3(Web3.HTTPProvider(provider_url))
+        # Remove POA middleware as Ganache doesn't require it
         # self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.setup_logging()
         self.verify_ganache_connection()
@@ -47,12 +46,12 @@ class EthereumHandler:
             if network_id != self.GANACHE_CONFIG['NETWORK_ID']:
                 raise ValueError(f"Connected to network {network_id}, expected Ganache network {self.GANACHE_CONFIG['NETWORK_ID']}")
 
-            # Test account access
+            # Verify we have access to accounts (Ganache should provide 10 funded accounts)
             accounts = self.w3.eth.accounts
             if not accounts:
                 raise ValueError("No accounts available on Ganache")
 
-            self.logger.info(f"Successfully connected to Ganache at {self.provider_url}")
+            self.logger.info(f"Successfully connected to Ganache. Available accounts: {len(accounts)}")
             return True
 
         except Exception as e:
@@ -71,17 +70,18 @@ class EthereumHandler:
                 contract_data = json.load(f)
             
             self.contract_abi = contract_data['abi']
-            # Use Ganache network ID
+            
+            # Specifically look for Ganache network deployment
             self.contract_address = contract_data['networks'][self.GANACHE_CONFIG['NETWORK_ID']]['address']
             
             self.contract = self.w3.eth.contract(
                 address=self.contract_address,
                 abi=self.contract_abi
             )
-            self.logger.info(f"Contract loaded at {self.contract_address} on Ganache")
+            self.logger.info(f"Contract loaded at {self.contract_address} on Ganache network")
 
         except Exception as e:
-            self.logger.error(f"Error loading contract on Ganache: {str(e)}")
+            self.logger.error(f"Error loading contract: {str(e)}")
             self.contract = None
             raise
 
@@ -90,113 +90,23 @@ class EthereumHandler:
         current_time = datetime.now().timestamp()
         if current_time - self.gas_price_cache['timestamp'] > 60:  # Cache for 1 minute
             try:
-                gas_price = self.w3.eth.gas_price
                 self.gas_price_cache = {
                     'timestamp': current_time,
-                    'price': gas_price
+                    'price': self.w3.eth.gas_price
                 }
             except Exception as e:
-                self.logger.warning(f"Using default Ganache gas price: {str(e)}")
+                self.logger.warning(f"Failed to get gas price: {str(e)}. Using default Ganache gas price.")
                 self.gas_price_cache = {
                     'timestamp': current_time,
                     'price': self.GANACHE_CONFIG['DEFAULT_GAS_PRICE']
                 }
         return self.gas_price_cache['price']
 
-    async def list_book(
-        self,
-        sender_address: str,
-        ipfs_hash: str,
-        price: int,
-        royalty: int,
-        private_key: str
-    ) -> Dict[str, Any]:
-        """List a book on the Ganache marketplace."""
-        try:
-            nonce = self.w3.eth.get_transaction_count(sender_address)
-            gas_price = self.get_gas_price()
-
-            # Prepare transaction with Ganache-specific gas limits
-            transaction = self.contract.functions.listBook(
-                ipfs_hash,
-                price,
-                royalty
-            ).build_transaction({
-                'from': sender_address,
-                'gas': min(2000000, self.GANACHE_CONFIG['GAS_LIMIT']),
-                'gasPrice': gas_price,
-                'nonce': nonce,
-            })
-
-            # Sign and send transaction
-            signed_txn = self.w3.eth.account.sign_transaction(
-                transaction, private_key
-            )
-            tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
-            
-            # Wait for transaction receipt with higher timeout for Ganache
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-            
-            return {
-                'status': 'success',
-                'transaction_hash': tx_hash.hex(),
-                'block_number': receipt['blockNumber'],
-                'gas_used': receipt['gasUsed']
-            }
-
-        except Exception as e:
-            self.logger.error(f"Error listing book on Ganache: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }
-
-    async def purchase_book(
-        self,
-        buyer_address: str,
-        book_id: int,
-        value: int,
-        private_key: str
-    ) -> Dict[str, Any]:
-        """Purchase a book from the Ganache marketplace."""
-        try:
-            nonce = self.w3.eth.get_transaction_count(buyer_address)
-            gas_price = self.get_gas_price()
-
-            transaction = self.contract.functions.purchaseBook(
-                book_id
-            ).build_transaction({
-                'from': buyer_address,
-                'gas': min(2000000, self.GANACHE_CONFIG['GAS_LIMIT']),
-                'gasPrice': gas_price,
-                'nonce': nonce,
-                'value': value
-            })
-
-            signed_txn = self.w3.eth.account.sign_transaction(
-                transaction, private_key
-            )
-            tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-
-            return {
-                'status': 'success',
-                'transaction_hash': tx_hash.hex(),
-                'block_number': receipt['blockNumber'],
-                'gas_used': receipt['gasUsed']
-            }
-
-        except Exception as e:
-            self.logger.error(f"Error purchasing book on Ganache: {str(e)}")
-            return {
-                'status': 'error',
-                'message': str(e)
-            }
-
     async def get_book_details(self, book_id: int) -> Dict[str, Any]:
-        """Get details of a listed book from Ganache."""
+        """Get details of a listed book."""
         try:
-            book = await self.contract.functions.books(book_id).call()
+            # For Ganache, we don't need to await this call
+            book = self.contract.functions.books(book_id).call()
             return {
                 'id': book_id,
                 'ipfs_hash': book[0],
@@ -206,19 +116,20 @@ class EthereumHandler:
                 'is_available': book[4]
             }
         except Exception as e:
-            self.logger.error(f"Error getting book details from Ganache: {str(e)}")
+            self.logger.error(f"Error getting book details: {str(e)}")
             return {}
 
     async def get_author_books(self, author_address: str) -> List[Dict[str, Any]]:
-        """Get all books by an author from Ganache."""
+        """Get all books by an author."""
         try:
-            book_count = await self.contract.functions.getAuthorBookCount(
+            # For Ganache, we don't need to await these calls
+            book_count = self.contract.functions.getAuthorBookCount(
                 author_address
             ).call()
             
             books = []
             for i in range(book_count):
-                book_id = await self.contract.functions.authorBooks(
+                book_id = self.contract.functions.authorBooks(
                     author_address, i
                 ).call()
                 book_details = await self.get_book_details(book_id)
@@ -228,17 +139,18 @@ class EthereumHandler:
             return books
 
         except Exception as e:
-            self.logger.error(f"Error getting author books from Ganache: {str(e)}")
+            self.logger.error(f"Error getting author books: {str(e)}")
             return []
 
     async def get_royalties(self, author_address: str) -> int:
-        """Get available royalties for an author from Ganache."""
+        """Get available royalties for an author."""
         try:
-            return await self.contract.functions.getRoyalties(
+            # For Ganache, we don't need to await this call
+            return self.contract.functions.getRoyalties(
                 author_address
             ).call()
         except Exception as e:
-            self.logger.error(f"Error getting royalties from Ganache: {str(e)}")
+            self.logger.error(f"Error getting royalties: {str(e)}")
             return 0
 
     async def withdraw_royalties(
@@ -246,24 +158,27 @@ class EthereumHandler:
         author_address: str,
         private_key: str
     ) -> Dict[str, Any]:
-        """Withdraw available royalties from Ganache."""
+        """Withdraw available royalties."""
         try:
             nonce = self.w3.eth.get_transaction_count(author_address)
             gas_price = self.get_gas_price()
 
-            transaction = self.contract.functions.withdrawRoyalties(
-            ).build_transaction({
+            # Build transaction with Ganache-specific gas settings
+            transaction = self.contract.functions.withdrawRoyalties().build_transaction({
                 'from': author_address,
                 'gas': min(2000000, self.GANACHE_CONFIG['GAS_LIMIT']),
                 'gasPrice': gas_price,
                 'nonce': nonce,
+                'chainId': self.GANACHE_CONFIG['CHAIN_ID']
             })
 
             signed_txn = self.w3.eth.account.sign_transaction(
                 transaction, private_key
             )
             tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            
+            # Ganache mines blocks instantly, so we can wait for receipt
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
 
             return {
                 'status': 'success',
@@ -273,7 +188,7 @@ class EthereumHandler:
             }
 
         except Exception as e:
-            self.logger.error(f"Error withdrawing royalties from Ganache: {str(e)}")
+            self.logger.error(f"Error withdrawing royalties: {str(e)}")
             return {
                 'status': 'error',
                 'message': str(e)
@@ -285,7 +200,7 @@ class EthereumHandler:
         signature: str,
         address: str
     ) -> bool:
-        """Verify an Ethereum signature on Ganache."""
+        """Verify an Ethereum signature."""
         try:
             message_hash = encode_defunct(text=message)
             recovered_address = self.w3.eth.account.recover_message(
@@ -294,7 +209,7 @@ class EthereumHandler:
             )
             return recovered_address.lower() == address.lower()
         except Exception as e:
-            self.logger.error(f"Error verifying signature on Ganache: {str(e)}")
+            self.logger.error(f"Error verifying signature: {str(e)}")
             return False
 
     def get_ganache_accounts(self) -> List[str]:
@@ -304,11 +219,3 @@ class EthereumHandler:
         except Exception as e:
             self.logger.error(f"Error getting Ganache accounts: {str(e)}")
             return []
-
-    def get_account_balance(self, address: str) -> int:
-        """Get balance of a Ganache account."""
-        try:
-            return self.w3.eth.get_balance(address)
-        except Exception as e:
-            self.logger.error(f"Error getting account balance from Ganache: {str(e)}")
-            return 0
